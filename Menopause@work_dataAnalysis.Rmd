@@ -1,8 +1,6 @@
 ---
-title: 'Menopause in the workplace: Challenges, barriers, and support measures'
-subtitle: 'Appendix X. '
-author: 'Anonymous contributors'
-date: "`r Sys.Date()`"
+title: 'Navigating menopause at work: A preliminary study about challenges and support systems'
+subtitle: 'Data pre-processing and data analysis report'
 bibliography: [packages.bib]
 nocite: '@*'
 output:
@@ -18,6 +16,8 @@ output:
   word_document: default
   theme: united
 ---
+
+Alzueta, E., Menghini, L., Volpe L., Baker, F. C., Garnier A., Sarrel P. M., de Zambotti, M.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
