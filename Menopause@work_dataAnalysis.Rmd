@@ -1,0 +1,1441 @@
+---
+title: 'Menopause in the workplace: Challenges, barriers, and support measures'
+subtitle: 'Appendix X. '
+author: 'Anonymous contributors'
+date: "`r Sys.Date()`"
+bibliography: [packages.bib]
+nocite: '@*'
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    css: styles.css
+    code_download: true
+    code_folding: hide
+  pdf_document: default
+  word_document: default
+  theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<br>
+
+# Aims and content
+
+The present document includes the data pre-processing and data analysis steps conducted to explore **the individual and work-related correlates of menopause experience at work**. The data were collected with an online survey available both in English and Spanish from February 1st to August 9th 2023, implemented with the [REDCap survey platform](https://www.project-redcap.org/).
+
+In the following sections, we read and recode the data exported from REDCap, we apply our exclusion criteria, we evaluate the psychometric qualities of the considered measures, we compute descriptive statistics, and we conduct regression analyses.
+
+<br>
+
+Through the document, each step is accompanied by the corresponding R code, as in the following example where we remove all objects from the R global environment. However, in the following section the code is hidden (or 'folded') and the "Show" button should be clicked to visualized it. Each line of code is described by a comment preceded by the `#` symbol.
+```{r class.source = "fold-show" }
+rm(list=ls()) # removing all objets from the workspace
+```
+
+The following R packages are used in this document (see [References](#ref) section):
+```{r class.source = "fold-show" }
+# required packages
+packages <- c("labourR","data.table","magrittr","plyr","ggplot2","gridExtra","Rmisc","Hmisc")
+
+# generate packages references
+knitr::write_bib(c(.packages(), packages),"packages.bib")
+
+# # run to install missing packages
+# xfun::pkg_attach2(packages, message = FALSE); rm(list=ls())
+```
+
+# 1. Data reading
+
+First, we read the raw `mp` data exported from REDCap on August 9th 2023. Note that the same information is separately included for the English and the Spanish version of the questionnaire.
+```{r  }
+# loading preliminary questionnaire data
+mp <- read.csv("data/MenopauseInTheWorkpl-FullExport_DATA_2023-08-09_0932.csv")
+
+# sample size and number of columns/variables
+cat("Read",nrow(mp),"responses;",ncol(mp),"variables")
+```
+
+<br>
+
+# 2. Data recoding
+
+Here, we prepare the data for the following analyses by selecting the considered variables and recoding their values.
+
+## 2.1. Language
+
+First, we merge the columns related to the English version of the questionnaire (ending with `_en`) with the corresponding Spanish item versions (ending with `_es`). The number of columns is now 116.
+```{r  }
+# recoding language
+mp$language <- as.factor(gsub("1","en",gsub("2","es",mp$language))) # 1 = en, 2 = es
+
+# merging English and Spanish responses
+for(i in 1:ncol(mp)){
+  if(grepl("_es",colnames(mp)[i])){
+    mp[!is.na(mp$language) &
+         mp$language=="es",colnames(mp)[which(colnames(mp)==gsub("_es","_en",colnames(mp)[i]))]] <-
+      mp[!is.na(mp$language) & mp$language=="es",colnames(mp)[i]] }} # moving es to en when language = "es"
+mp <- mp[,!grepl("_es",colnames(mp))] # removing all columns referred to Spanish responses
+colnames(mp) <- gsub("_en","",colnames(mp))
+  
+# updated No. of columns/variables
+cat("Updated No. of variables:",ncol(mp))
+```
+
+## 2.2. Categorical variables
+
+Second, we recode all categorical variables by converting numerical values into the corresponding response labels. Particularly, for the `country` variable we use an external file reporting the whole list of countries and the corresponding numerical value.
+```{r  }
+# ...............................recoding demographics
+countries <- read.csv2("data/countries.csv") # countries (note: removed "Azerbaijan" due to gap in data encoding)
+head(countries) # showing first lines
+for(i in 1:nrow(countries)){ 
+  mp[!is.na(mp$country) & mp$country==countries[i,"number"],"country"] <- countries[i,"country"] }
+mp$ethnicity <- gsub("1","Hispanic/Latino", # ethnicity
+                     gsub("2","Not Hispanic/Latino",
+                          gsub("3","Unknown",
+                               gsub("4","NS",mp$ethnicity))))
+mp$race <- gsub("1","Native", # race
+                    gsub("2","Asian",
+                         gsub("3","Black",
+                              gsub("4","Native Pacific",
+                                   gsub("5","White",
+                                        gsub("6","Unknown",
+                                             gsub("7","NS",mp$race)))))))
+mp$gender <- gsub("1","Woman", # gender
+                  gsub("2","Non-binary",
+                       gsub("3","Transgender woman",
+                            gsub("4","Transgender man",
+                                 gsub("5","NS",mp$gender))))) # gender
+colnames(mp)[which(colnames(mp)=="highest_education")] <- "education"
+mp$education <- gsub("1","Primary_some", # education
+                     gsub("2","Primary_complete",
+                          gsub("3","Secondary",
+                               gsub("4","Training",
+                                    gsub("5","Undergraduate",
+                                         gsub("6","Postgraduate",mp$education))))))
+colnames(mp)[which(colnames(mp)=="relationship_status")] <- "partner"
+mp$partner <- gsub("1","Yes",gsub("2","No",mp$partner)) # partner
+mp$childcare <- gsub("1","Yes",gsub("0","No",mp$childcare)) # childcare
+mp$caregiver <- gsub("1","Yes",gsub("0","No",mp$caregiver)) # caregiver
+
+# ...............................recoding lifestyle
+mp$health_conditions <- gsub("1","Yes",gsub("0","No",mp$health_conditions)) # health_conditions
+mp$tobacco <- gsub("1","Yes",gsub("0","No",mp$tobacco)) # tobacco
+
+# ...............................recoding reproductive history
+mp$period_change <- gsub("1","No changes (regular)", # period_change
+                         gsub("2","No changes (irregular)",
+                              gsub("3","Changes to irregular",
+                                   gsub("4","Not sure",
+                                        gsub("5","NS",mp$period_change)))))
+mp$oophorectomy <- gsub("0","Never",gsub("1","Once",gsub("2","Twice",mp$oophorectomy))) # oophorectomy
+mp$hysterectomy <- gsub("1","Yes",gsub("0","No",mp$hysterectomy)) # hysterectomy
+
+# ...............................recoding job variables
+mp$job_level <- gsub("1","Self-employed", # job
+                     gsub("2","Executive",
+                          gsub("3","Manager",
+                               gsub("4","Employee",
+                                    gsub("5","Other",mp$job_level)))))
+colnames(mp)[which(colnames(mp)=="on_call")] <- "NightShift_onCall"
+mp$NightShift_onCall <- gsub("1","Yes",gsub("0","No",mp$NightShift_onCall)) # work extended availability
+mp$remote_work <- gsub("1","Remote",gsub("2","Hybrid",gsub("3","Onsite",mp$remote_work))) # remote_work
+
+# recoding all categorical variables as factor
+factors <- c("record_id","language","country","race","ethnicity","gender","education","partner","childcare","caregiver",
+             "health_conditions","tobacco","period_change","oophorectomy","hysterectomy",
+             paste0("reproductive_specifics___",0:5),
+             "job_level","NightShift_onCall","remote_work",
+             paste0("work_problems___",1:9),paste0(rep(paste0("measures_",1:9),each=2),"___",1:2),
+             paste0("discussion_concerns___",c(1:9,0)),"currency")
+mp[,factors] <- lapply(mp[,factors],as.factor)
+```
+
+### 2.3.1. Recoding jobs
+
+Here, we recode the `job` variable by using the `labourR` package and some manual correction. We also create the `retired` variable to flag participants that reported being retired.
+```{r  }
+# creating retired variable
+mp$retired <- FALSE
+mp[!is.na(mp$job) & gsub(" ","",mp$job)%in%c("Retired","retired"),"retired"] <- TRUE
+mp[mp$retired==TRUE,"job"] <- NA # removing job value when retired = TRUE
+mp[!is.na(mp$job) & mp$job=="","job"] <- NA # empty values as NA
+
+# recoding jobs based on labourR
+library(labourR); library(data.table); library(magrittr); library(plyr)
+corpus <- data.table(id=mp$record_id,text=mp$job,language=mp$language) # creating corpus
+languages <- as.character(na.omit(unique(corpus$language))) # language classes
+suggestions <- lapply(languages, function(lang) { # automatic classification
+  classify_occupation(corpus=corpus[corpus$language==lang],lang=lang,isco_level=2,num_leaves=10) }) %>% 
+  rbindlist
+corpus <- plyr::join(corpus,suggestions,by="id",type="left")
+
+# manually adjusting automatic classifications
+corpus$text <- gsub(" ","",corpus$text) # removing space
+corpus[!is.na(corpus$text) & corpus$text%in%c("BusinessOwner","Businessowner","ExecutiveDirector",
+                                              "NonprofitExecutiveDirector","nonprofitexec","SVP",
+                                              "CountyExecutive","marketingagencyowner/operator",
+                                              "CXO","ceo-softwarecompany","ExecutiveTeamLeader",
+                                              "startupfounder","founderofatechcompany","nonprofitexecutive"),
+       "preferredLabel"] <- "Chief executives, senior officials and legislators"
+corpus[!is.na(corpus$text) & corpus$text%in%c("medicalofficer"),
+       "preferredLabel"] <- "Health professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("HumanResources","humanresources","HR","supervisor","SalesDirector"),
+       "preferredLabel"] <- "Administrative and Commercial Managers"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Volunteercoordinator","Volunteer","Nonprofit","filmdesigner","proofreader",
+                                              "TechnicalWritet"),
+       "preferredLabel"] <- "Legal, Social and Cultural Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("shiftsupervisor"),
+       "preferredLabel"] <- "Production and Specialised Services Managers"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Publichealthcommunications","headofmarketing","CorporateEventManager",
+                                              "Administración","administrativo",
+                        "Corporateeventproducer","Educationadministrator","administration","proj.admin","Marketing",
+                        "Administrativo","administrator","contadoraindependiente","Accountant"),
+       "preferredLabel"] <- "Business and Administration Associate Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Scientist","scientist","Researcher","researcher","researchscientist",
+                                              "Researchdirector","Researrch","Research","research","LabManager"),
+       "preferredLabel"] <- "Science and Engineering Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Researchassistamt"),
+       "preferredLabel"] <- "Science and Engineering Associate Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("collegeadvisor","headofdepartmentacademia","Principal","SLP"),
+       "preferredLabel"] <- "Teaching professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Landlord"),
+       "preferredLabel"] <- "Hospitality, Retail and Other Services Managers"
+corpus[!is.na(corpus$text) & corpus$text%in%c("clinician","medico","Medico","Médica","medicoespecialista","Clinical",
+                                              "Physician","Primarycarephysician","Médicoradiologa"),
+       "preferredLabel"] <- "Health Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("asiantuntijasairaanhoitaja","Healthcareassistant",
+                                              "RespiratoryCarepractitioner","PatientAccess","Nursepractitioner"),
+       "preferredLabel"] <- "Health Associate Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("highereducationadministration","administrativo"),
+       "preferredLabel"] <- "Business and Administration Associate Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Sales","sales","Customersservice","Agentedeventas","VA"),
+       "preferredLabel"] <- "Sales Workers"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Amadecasa","housewife","Homemaker"),
+       "preferredLabel"] <- "Cleaners and Helpers"
+corpus[!is.na(corpus$text) & corpus$text%in%c("uxresearch","Itprofessional","IT"),
+       "preferredLabel"] <- "Information and Communications Technology Professionals"
+corpus[!is.na(corpus$text) & corpus$text%in%c("Secretary","auxiliarcontable"),
+       "preferredLabel"] <- "Numerical and Material Recording Clerks"
+corpus[!is.na(corpus$text) & corpus$text%in%c("architect"),
+       "preferredLabel"] <- "Production and Specialized Services Managers"
+mp$job_recoded <- as.factor(tolower(corpus$preferredLabel)) # job as factor
+mp <- mp[,c(1:which(colnames(mp)=="job"),ncol(mp)-1,ncol(mp),(which(colnames(mp)=="job")+1):(ncol(mp)-2))]
+
+# showing first lines
+mp[!is.na(mp$job_recoded),c("job","job_recoded")]
+```
+
+## 2.3. Other variables
+
+Third, we recode other variables (e.g., Boolean variables, date variables), and we remove the variables that are not considered for the present work. We rename the included variables and replace missing values with `NA` for multi-choice items. Below we print the names of the included variables.
+```{r  }
+# Boolean as logical
+mp$informed_consent <- as.logical(mp$informed_consent)
+mp$survey_complete <- as.logical(mp$survey_complete)
+
+# Time variables as dates or as.POSIXct
+ mp[mp$survey_timestamp=="[not completed]","survey_timestamp"] <- NA # empty and [not completed] as missing
+mp[mp$period_last_date=="","period_last_date"] <- NA
+mp$survey_timestamp <- # adjusting date format
+  as.POSIXct(gsub("/23","/2023",gsub("/22","/2022",gsub("\\.","\\:",mp$survey_timestamp))),format="%Y-%m-%d %H:%M:%S")
+mp$period_last_date <- as.Date(gsub("0520","2020",gsub("1120","2020",mp$period_last_date)),format="%Y-%m-%d")
+
+# Removing variables not considered
+mp[,c("redcap_survey_identifier","survey_complete","job","currency","money_spent")] <- NULL
+
+# renaming variables
+colnames(mp) <- c("ID","survey_timestamp","language","informed_consent", # response info
+                  "age","country","race","ethnicity","gender","education","partner","childcare","caregiver", # demograph
+                  "health_conditions","tobacco","exercise", # lifestyle
+                  "period_number","period_change","period_last_date", # periods info
+                  paste0("rs_",c("oophor","hyster", # reproductive specifics
+                  "postMP_medical","horm_birthCtrl","MP_hormTheraphy","periodStop_medical","pregnantBreast","none")),
+                  "MP_knowledge",
+                  paste0("mrs_",1:11),"mrs_impact", # MRS
+                  paste0("mf_",1:9),"mf_impact", # mental fog
+                  "retired","job_recoded","job_level","weeklyWorkHours","NightShift_onCall","remote_work", # job
+                  paste0("qwi_",1:5), # Quantitative Workload Inventory (QWI)
+                  paste0("uwes_",1:3), # Utrecht Work Engagement Scale (UWES)
+                  paste0("cbi",1:7), # Copenhagen Burnout Inventory (CBI)
+                  "job_sat","life_sat", # satisfaction
+                  paste0("ti_",1:3), # turnover intentions
+                  paste0("workProblems_",1:9), # MP-related problems at work
+                  paste0(rep(paste0("measures_",1:9),each=2),"_",c("helpful","implemented")),
+                  paste0("concerns_",c(1:9,0)))
+
+# incomplete responses to multi-choice items: from 0 to NA (missing)
+for(i in 1:nrow(mp)){
+  if(is.na(mp[i,"ti_3"])){ mp[i,(which(colnames(mp)=="ti_3")+1):ncol(mp)] <- NA }}
+
+# print variable names
+colnames(mp)
+```
+
+<br>
+
+# 3. Inclusion criteria
+
+Here, we filter participants based on the following inclusion criteria:
+
+1. **Pilots**: pilot responses from the research team are removed
+
+2. **Empty responses**: empty responses are removed
+
+3. **Country**: only US respondents are included
+
+4. **Age**: only respondents between 40 and 65 are included
+
+5. **Weekly working hours**: only respondents with 1+ working hour per week are included
+
+6. **Language**: although the questionnaire was originally designed both in English and in Spanish, the number of Spanish responses is very low after the application of the other inclusion criteria
+
+```{r  }
+cat("Original No. of responses:",nrow(mp))
+```
+
+## 3.1. Pilots
+
+First, we remove pilot responses from the research team submitted before the original beginning of the data collection or associated with known codes.
+```{r  }
+# removing responses submitted before the beginning of the data collection (corresponding to the ID value 85)
+filtered <- mp[as.integer(as.character(mp$ID)) >= 85,]
+
+# removing further responses from the research team
+filtered <- filtered[!filtered$ID%in%c(314,315,316,317),]
+
+# updating dataset
+cat("Removing",nrow(mp)-nrow(filtered),"pilot responses - updated sample size =",nrow(filtered))
+mp <- filtered
+```
+
+## 3.2. Empty responses
+
+Second, we remove empty responses (i.e., missing value to any variable).
+```{r  }
+# removing empty responses (missing value to initial variables)
+filtered <- mp[!is.na(mp$country) & !is.na(mp$age),]
+
+# updating dataset
+nonEmpty <- nrow(filtered)
+cat("Removing",nrow(mp)-nrow(filtered),"empty responses - updated sample size =",nonEmpty)
+mp <- filtered
+```
+
+## 3.3. Country
+
+Third, we remove non-US respondents since they are too few.
+```{r  }
+# showing number of responses per country
+table(mp$country)
+
+# removing non-US respondents
+filtered <- mp[mp$country=="United States",]
+
+# updating dataset
+contryFilt <- nrow(mp)-nrow(filtered)
+cat("Removing",contryFilt,"non-US respondents - updated sample size =",nrow(filtered))
+mp <- filtered
+```
+
+## 3.4. Age
+
+Fourth, we remove participants younger than 40 or older than 65.
+```{r  }
+# removing under 40 and over 65
+filtered <- mp[mp$age>=40 & mp$age<=65,]
+
+# updating dataset
+ageFilt <- nrow(mp)-nrow(filtered)
+cat("Removing",ageFilt,"respondents under 40 or over 65 - updated sample size =",nrow(filtered))
+mp <- filtered
+```
+
+## 3.5. Working hours
+
+Fifth, we remove participants that reported zero working hours.
+```{r  }
+# removing participants that reported zero working hours (but keeping participants with missing value)
+filtered <- mp[is.na(mp$weeklyWorkHours) | (!is.na(mp$weeklyWorkHours) & mp$weeklyWorkHours>0),]
+
+# updating dataset
+workFilt <- nrow(mp)-nrow(filtered)
+cat("Removing",workFilt,"respondents with zero working hours - updated sample size =",nrow(filtered))
+mp <- filtered
+
+# sanity check: any retired?
+cat("Sanity check:",nrow(mp[!is.na(mp$retired) & mp$retired==TRUE,])==0)
+```
+
+## 3.6. Language
+
+Finally, we remove Spanish respondents due to their low prevalence in the filtered sample.
+```{r  }
+# removing participants that reported zero working hours (but keeping participants with missing value)
+filtered <- mp[mp$language=="en",]
+
+# updating dataset
+langFilt <- nrow(mp)-nrow(filtered)
+cat("Removing",langFilt,"Spanish respondents - updated sample size =",nrow(filtered))
+mp <- filtered
+```
+
+## 3.7. Summary
+
+In summary, from the original number of `r nonEmpty` responses that were at least partially completed, we excluded `r contryFilt` responses from non-US participants, `r ageFilt` aged under 40 or over 65, `r workFilt` respondents that reported zero working hours, and `r langFilt` Spanish respondents.
+
+The final sample size is composed by `r nrow(mp)` responses.
+
+<br>
+
+# 4. Psychometrics
+
+Here, we visually inspect and compute the Cronbach's alpha coefficients for each multi-item measure included in the survey and we compute the corresponding composite score. Cronbach's alpha higher than .60 are considered as acceptable.
+
+The `plot.corr` function is used to visualize correlation coefficients.
+```{r, out.width="300px",fig.width=10, fig.height=2.5,warning=FALSE, message=FALSE,results='asis'}
+# function to plot iter-item correlations
+plot.corr <- function(data,printText=TRUE,printCorr=TRUE,ytext=FALSE){ require(reshape2); require(ggplot2)
+  p <- ggplot(melt(cor(data,use="complete.obs")),aes(x=Var1,y=Var2,fill=value)) + geom_tile() +
+  scale_fill_gradient2(low="darkblue",high="#f03b20",mid="white",midpoint=0,limit = c(-1,1), space = "Lab",
+                       name="Pearson\nCorrelation",guide="legend",breaks=round(seq(1,-1,length.out = 6),2),
+                       minor_breaks=round(seq(1,-1,length.out = 6),2))+
+  theme(axis.text.x=element_text(angle=30)) + labs(x="",y="")
+  if(printCorr==TRUE){ 
+    p <- p + geom_text(aes(x=Var1,y=Var2,label=round(value,2)),color="black",size=3.5) } 
+  if(printText==FALSE) { p <- p + theme(axis.text.x=element_blank())  }
+  if(ytext==FALSE){ p <- p + theme(axis.text.y=element_blank()) }
+  return(p) }
+```
+
+## 4.1. Menopause rating scale
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+cols <- paste0("mrs_",1:11)
+
+# plotting raw item scores
+par(mfrow=c(1,6)); for(coL in cols){ hist(mp[,coL],main=coL,xlab="") }
+```
+```{r  fig.width=12,fig.height=4,out.width="600px"}
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,cols])$feldt
+```
+```{r  fig.width=8,fig.height=4,warning=FALSE,message=FALSE}
+# selecting columns
+plot.corr(mp[,cols])
+
+# computing composite score
+mp$MRS <- apply(mp[,cols],1,sum)
+
+# visualizing composite score distribution
+hist(mp$MRS)
+```
+
+### 4.1.1. MRS subscales
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+psy <- paste0("mrs_",4:7)
+som <- paste0("mrs_",c(1:3,11))
+urog <- paste0("mrs_",8:10)
+
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,psy])$feldt # psychological
+psych::alpha(mp[,som])$feldt # somatic
+psych::alpha(mp[,urog])$feldt # urogenital
+
+# computing composite scores
+mp$mrs.psy <- apply(mp[,paste0("mrs_",4:7)],1,sum)
+mp$mrs.som <- apply(mp[,paste0("mrs_",c(1:3,11))],1,sum)
+mp$mrs.uro <- apply(mp[,paste0("mrs_",8:10)],1,sum)
+
+# visualizing composite score distributions
+par(mfrow=c(1,3)); for(coL in paste0("mrs.",c("psy","som","uro"))) { hist(mp[,coL],main=coL,xlab="") }
+```
+
+<br>
+
+## 4.2. Mental fog
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+cols <- paste0("mf_",1:9)
+
+# plotting raw item scores
+par(mfrow=c(1,6)); for(coL in cols){ hist(mp[,coL],main=coL,xlab="") }
+```
+```{r  fig.width=12,fig.height=4,out.width="600px"}
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,cols])$feldt
+```
+```{r  fig.width=8,fig.height=4,warning=FALSE,message=FALSE}
+# selecting columns
+plot.corr(mp[,cols])
+
+# computing composite score
+mp$MF <- apply(mp[,cols],1,mean,na.rm=T)
+
+# visualizing composite score distribution
+hist(mp$MF)
+```
+
+<br>
+
+## 4.3. Workload
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+cols <- paste0("qwi_",1:5)
+
+# plotting raw item scores
+par(mfrow=c(1,6)); for(coL in cols){ hist(mp[,coL],main=coL,xlab="") }
+```
+```{r  fig.width=12,fig.height=4,out.width="600px"}
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,cols])$feldt
+```
+```{r  fig.width=8,fig.height=4,warning=FALSE,message=FALSE}
+# selecting columns
+plot.corr(mp[,cols])
+
+# computing composite score
+mp$WL <- apply(mp[,cols],1,mean,na.rm=T)
+
+# visualizing composite score distribution
+hist(mp$WL)
+```
+
+<br>
+
+## 4.4. Work engagement
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+cols <- paste0("uwes_",1:3)
+
+# plotting raw item scores
+par(mfrow=c(1,6)); for(coL in cols){ hist(mp[,coL],main=coL,xlab="") }
+```
+```{r  fig.width=12,fig.height=4,out.width="600px"}
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,cols])$feldt
+```
+```{r  fig.width=8,fig.height=4,warning=FALSE,message=FALSE}
+# selecting columns
+plot.corr(mp[,cols])
+
+# computing composite score
+mp$WE <- apply(mp[,cols],1,mean,na.rm=T)
+
+# visualizing composite score distribution
+hist(mp$WE)
+```
+
+<br>
+
+## 4.5. Emotional exhaustion
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+cols <- paste0("cbi",1:7)
+
+# reversing item
+mp$cbi7 <- 6 - mp$cbi7 
+
+# plotting raw item scores
+par(mfrow=c(1,6)); for(coL in cols){ hist(mp[,coL],main=coL,xlab="") }
+```
+```{r  fig.width=12,fig.height=4,out.width="600px"}
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,cols])$feldt
+```
+```{r  fig.width=8,fig.height=4,warning=FALSE,message=FALSE}
+# selecting columns
+plot.corr(mp[,cols])
+
+# computing composite score
+mp$EE <- apply(mp[,cols],1,mean,na.rm=T)
+
+# visualizing composite score distribution
+hist(mp$EE)
+```
+
+<br>
+
+## 4.6. Turnover intentions
+```{r  fig.width=12,fig.height=3,out.width="600px"}
+# selecting columns
+cols <- paste0("ti_",1:3)
+
+# plotting raw item scores
+par(mfrow=c(1,6)); for(coL in cols){ hist(mp[,coL],main=coL,xlab="") }
+```
+```{r  fig.width=12,fig.height=4,out.width="600px"}
+# Cronbach's alpha and 95% CI based on Feldt method
+psych::alpha(mp[,cols])$feldt
+```
+```{r  fig.width=8,fig.height=4,warning=FALSE,message=FALSE}
+# selecting columns
+plot.corr(mp[,cols])
+
+# computing composite score
+mp$TI <- apply(mp[,cols],1,mean,na.rm=T)
+
+# visualizing composite score distribution
+hist(mp$TI)
+```
+
+# 5. Data dictionary
+
+Here, we remove unused variables and display the data dictionary of the dataset used in the following analyses.
+```{r  fig.width=8,fig.height=4}
+# removing unused variables
+mp[,c(which(colnames(mp)%in%c("language","informed_consent","country","rs_none","retired")),
+      which(colnames(mp)=="qwi_1"):which(colnames(mp)=="ti_3"))] <- NULL
+
+# showing data structure
+str(mp)
+```
+
+<br>
+
+## Response info
+
+- `ID` = participant's ID
+
+- `survey_timestamp` = survey submission time and date
+
+<br>
+
+## About yourself
+
+- `age` = participants' age (years)
+
+- `country` = participants' country
+
+- `race`, `ethnicity` = participants' race and ethnicity
+
+- `gender` = participants' gender
+
+- `education` = education level (Postgraduate, Undergraduate, etc.)
+
+- `partner` = being in a romantic relationshi (Yes/No)
+
+- `childcare` = currently taking care of 1+ children (Yes/No)
+
+- `caregiver` = currently being a caregiver for an adult (parents, relatives, etc.) (Yes/No)
+
+- `health_condition` = currently suffering fro an health condition (Yes/No)
+
+- `tobacco` = being a smoker (Yes/No)
+
+- `exercise` = No. of physical exercise sessions per week (1-7)
+
+<br>
+
+## Reproductive history
+
+- `period_number` = No. of periods over the last month
+
+- `period_change` = observed changes in the period over the last 6 months (No changes (regular), No changes (irregular), Changes to irregular, Not sure, Not applicable)
+
+- `period_last_date` = date of the last period
+
+- `rs_oophor` = oophorectomy (Never, Once, Twice)
+
+- `rs_hyster` = Hysterectomy (Yes/No)
+
+- `rs_postMP_medical` = being in menopause due to medical condition (Yes/No)
+
+- `rs_horm_birthCtrl` = using hormonal birth control (Yes/No)
+
+- `rs_MP_hormTheraphy` = under hormonal teraphy for menopause (Yes/No)
+
+- `rs_periodStop_medical` = period stopped or irregular due to medical condition or procedure (Yes/No)
+
+- `rs_pregnantBreast` = being pregnant or breastfeeding (Yes/No)
+
+<br>
+
+## Menopause experience
+
+- `mp_knowledge` = self-reported knowledge about menopause (from 0 = Nothing to 4 = extremely knowledgeable)
+
+- `mrs_1` - `mrs_11` = scores at the MRS symptoms (0-4) as ordered in the survey
+
+- `mrs_impact` = perceived impact of the selected menopause symptoms on respondent's work life
+
+- `mf_1` - `mf_9` = scores at the mental fatigue scale (0-4) as ordered in the survey
+
+- `mf_impact` = perceived impact of the selected menopause symptoms on respondent's work life
+
+<br>
+
+## About your job
+
+- `job_recoded` = recoded occupational group (using ISCO classification)
+
+- `job_level` = job level/position (employee, executive, employer)
+
+- `weeklyWorkHours` = weekly working hours (No. of working hours per week)
+
+- `NightShift_onCall` = doing nightshift work or on call job (Yes/No)
+
+- `remote_work` = doing remote work (Remote, Onsite, Hybrid)
+
+<br>
+
+## Work experience
+
+- `workProblems_1` - `workProblems_8` = menopause-related work problems as reported in the survey (0 = no, 1 = yes)
+
+- `workProblems_9` = participant reporting "None of these options apply to me" (0 = no, 1 = yes)
+
+<br>
+
+## Menopause support
+
+- `measures_1_helpful` - `measures_9_helpful` = organizational measures considered as helpful/desired (0 = no, 1 = yes)
+
+- `measures_1_implemented` - `measures_9_implemented` = organizational measures already implemented in the respondent's workplace (0 = no, 1 = yes)
+
+- `concerns_1` - `concerns_9` = concerns about discussing menopause at work (0 = no, 1 = yes)
+
+- `concerns_0` = participant reporting "no concerns about discussing menopause at work" (0 = no, 1 = yes)
+
+<br>
+
+# 6. Descriptives
+
+Here, we summarize the descriptive statistics of the sample, including the survey completion rate as well as univariate and bivariate descriptives.
+
+## 6.1. Completion rate
+
+Here, we inspect the overall survey completion rate and that of each section of the survey. Note that all participants completed the "About yourself" and the "Reproductive history" sections.
+```{r  fig.width=8,fig.height=4}
+cat(nrow(mp[!is.na(mp$survey_timestamp),]),"complete over",nrow(mp),"responses,",
+    round(100*nrow(mp[!is.na(mp$survey_timestamp),])/nrow(mp),1),"%")
+
+# No. of responses per section
+mp[!is.na(mp$rs_none),"scr"] <- "1-yourSelf-reproHistory"
+mp[!is.na(mp$mrs_impact),"scr"] <- "2-menopauseRating"
+mp[!is.na(mp$mf_impact),"scr"] <- "3-mentalFog"
+mp[!is.na(mp$qwi_5),"scr"] <- "4-yourJob"
+mp[!is.na(mp$workProblems_9),"scr"] <- "5-WorkExp"
+mp[!is.na(mp$money_spent),"scr"] <- "6-Full"
+p <- table(as.factor(mp$scr))
+for(i in (length(p)-1):1){ p[i] <- p[i] + p[i+1]}
+p # No. of responses
+round(100*p/nrow(mp),1) # % of responses
+```
+
+## 6.2. Univariate descriptives
+
+Here, we provide univariate statistics for each considered variable (i.e., frequency for categorical and mean, SD for quantitative).
+
+### 6.2.1. About yourself
+
+First, we summarize the sample characteristics as evaluated in the 'About yourself' section of the survey.
+```{r  }
+# selecting variables
+p <- data.frame(Variable=c("age","race","ethnicity","education","partner","caregiver","childcare",
+                           "health_conditions","tobacco","exercise"))
+
+# computing descriptives
+for(i in 1:nrow(p)){
+  if(p[i,"Variable"]%in%c("age","exercise")){ p[i,"Descr"] <- paste0(round(mean(mp[,p[i,"Variable"]]),2)," (",
+                                                        round(sd(mp[,p[i,"Variable"]]),2),")") 
+  } else { na.incl <- length(summary(mp[,p[i,"Variable"]])) == nlevels(mp[,p[i,"Variable"]])
+    if(na.incl==TRUE) {
+      p[i,"Descr"] <- paste0(levels(mp[,p[i,"Variable"]])," ",
+                                 round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ")
+    } else { p[i,"Descr"] <- paste0(c(levels(mp[,p[i,"Variable"]]),NA)," ",
+                                 round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ") } }}
+      
+# printing descriptives
+knitr::kable(p)
+
+# childcare and/or caregiving for an adult
+childANDad <- nrow(mp[!is.na(mp$childcare) & !is.na(mp$caregiver) & mp$childcare=="Yes" & mp$caregiver=="Yes",])
+childORad <- nrow(mp[!is.na(mp$childcare) & !is.na(mp$caregiver) & (mp$childcare=="Yes" | mp$caregiver=="Yes"),])
+cat(childANDad,"(",round(100*childANDad/nrow(mp[!is.na(mp$childcare) & !is.na(mp$caregiver),]),2),"% )",
+    "reporting childcare AND taking care for an adult\n",
+    childORad,"(",round(100*childORad/nrow(mp[!is.na(mp$childcare) & !is.na(mp$caregiver),]),2),"% )",
+    "reporting childcare OR taking care for an adult")
+```
+
+### 6.2.2. Reproductive history
+
+Second, we summarize the sample characteristics evaluated in the 'Reproductive history' section of the survey. Particularly, we create a new variable `postMP` identifying participants in a **natural post-menopause condition** (i.e., with no periods over the last year and simultaneous absence of oophorectomy or hysterectomy, use of hormone birth control, pregnancy or breastfeeding, and not reporting being in menopause due to other medical conditions) and those in **post-menopause due to medical reasons** (i.e., those explicitly reporting that option or reporting full oophorectomy). Moreover, based on the last period date, we also compute the `MPage`, that is the number of years since the beginning of menopause, which we describe separately for the two groups.
+```{r  }
+# creating postMP variable
+mp$postMP <- factor(NA,levels=c("Natural","Medical","No"))
+mp[(!is.na(mp$period_number) & mp$period_number==0)  & 
+     (!is.na(mp$rs_oophor) & mp$rs_oophor!="Twice") & (!is.na(mp$rs_hyster) & mp$rs_hyster=="No") &
+     (!is.na(mp$rs_horm_birthCtrl) & mp$rs_horm_birthCtrl==0) & (!is.na(mp$rs_pregnantBreast) & mp$rs_pregnantBreast==0) &
+     (!is.na(mp$rs_postMP_medical) & mp$rs_postMP_medical==0),"postMP"] <- "Natural"
+mp[(!is.na(mp$period_number) & mp$period_number==0)  & 
+     ((!is.na(mp$rs_postMP_medical) & mp$rs_postMP_medical==1)
+      |(!is.na(mp$rs_oophor) & mp$rs_oophor=="Twice")),"postMP"] <- "Medical"
+mp[!is.na(mp$period_number) & mp$period_number>0,"postMP"] <- "No"
+cat("Post-menopause status:"); round(100*summary(mp$postMP)/nrow(mp),2)
+
+# computing years in MP
+postMP <- mp[!is.na(mp$postMP) & mp$postMP!="No",] # subsetting post-MP (N = 118)
+postMP$MPage <- as.numeric(difftime(Sys.Date(),postMP$period_last_date,units="days"))/365
+cat("Years in 'natural' menopause: mean =",round(mean(postMP[postMP$postMP=="Natural","MPage"]),2),
+    "; SD =",round(sd(postMP[postMP$postMP=="Natural","MPage"]),2))
+cat("Years in 'medical' menopause: mean =",round(mean(postMP[postMP$postMP=="Medical","MPage"]),2),
+    "; SD =",round(sd(postMP[postMP$postMP=="Medical","MPage"]),2))
+
+# selecting variables
+p <- data.frame(Variable=c("postMP","MPage","rs_oophor","rs_hyster","rs_horm_birthCtrl","rs_MP_hormTheraphy",
+                           "period_change"))
+
+# computing descriptives
+for(i in 1:nrow(p)){
+  if(p[i,"Variable"]=="MPage"){ p[i,"Descr"] <- paste0(round(mean(postMP$MPage),2)," (",round(sd(postMP$MPage),2),")") 
+  } else { na.incl <- length(summary(mp[,p[i,"Variable"]])) == nlevels(mp[,p[i,"Variable"]])
+    if(na.incl==TRUE) {
+      p[i,"Descr"] <- paste0(levels(mp[,p[i,"Variable"]])," ",
+                                 round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ")
+    } else { p[i,"Descr"] <- paste0(c(levels(mp[,p[i,"Variable"]]),NA)," ",
+                                 round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ") } }}
+      
+# printing descriptives
+knitr::kable(p)
+```
+
+### 6.2.3. About your job
+
+Third, we summarize the sample characteristics as evaluated in the 'About your job' section of the survey.
+```{r  }
+# selecting variables
+p <- data.frame(Variable=c("job_level","weeklyWorkHours","NightShift_onCall","remote_work"))
+
+# computing descriptives
+for(i in 1:nrow(p)){
+  if(p[i,"Variable"]=="weeklyWorkHours"){ p[i,"Descr"] <- paste0(round(mean(mp$weeklyWorkHours,na.rm=TRUE),2),
+                                                                 " (",round(sd(mp$weeklyWorkHours,na.rm=TRUE),2),")") 
+  } else { na.incl <- length(summary(mp[,p[i,"Variable"]])) == nlevels(mp[,p[i,"Variable"]])
+    if(na.incl==TRUE) {
+      p[i,"Descr"] <- paste0(levels(mp[,p[i,"Variable"]])," ",
+                                 round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ")
+    } else { p[i,"Descr"] <- paste0(c(levels(mp[,p[i,"Variable"]]),NA)," ",
+                                 round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ") } }}
+
+# printing descriptives
+knitr::kable(p)
+
+# occupational groups
+cat("Occupational groups in the sample (%):"); round(100*summary(mp$job_recoded)[order(summary(mp$job_recoded),
+                                                                                       decreasing=TRUE)]/nrow(mp),2)
+```
+
+<br>
+
+### 6.2.4. Menopause & work
+
+Fourth, we report the mean and SD for each quantitative variable reflecting menopause and work experience both for the whole sample and separately per menopause status. The distribution of the same variables are shown below. We can see that the total `MRS`, the `WE`, and the `EE` scores are roughly symmetrically distributed, whereas all the remaining distributions are quite skewed. 
+```{r }
+# computing univariate descriptives
+variables <- c("MRS","mrs.psy","mrs.som","mrs.uro","MF","WL","WE","EE","TI") # selecting variables
+descr <- as.data.frame(matrix(nrow=0,ncol=3)) # empty table to be filled with values
+for(variable in variables){ # computing values
+  descr <- rbind(descr,
+                 data.frame(meansd=paste0(round(mean(mp[,variable],na.rm=T),2)," (",round(sd(mp[,variable],na.rm=T),2),")"))) }
+descr <- cbind(Variable=c("MRS total score (0-44)","MRS psychological (0-16)","MRS somatic (0-16)", # adding variable names
+                          "MRS urogenital (0-12)","Mental fog (0-4)","Workload (1-5)","Work engagement (0-6)",
+                          "Emotional exhaustion (1-5)","Turnover intentions (1-7)"),descr)
+
+# showing univaraite descriptives
+knitr::kable(descr)
+
+# plotting distributions
+par(mfrow=c(3,3))
+for(variable in variables){ hist(mp[,variable],main=variable,xlab=FALSE) }
+
+# MRS and MF negative impact on work life
+cat("MRS negative impact on work life: mean =",
+    round(mean(mp$mrs_impact,na.rm=T),2),", SD =",round(sd(mp$mrs_impact,na.rm=T),2))
+cat("MF negative impact on work life: mean =",
+    round(mean(mp$mf_impact,na.rm=T),2),", SD =",round(sd(mp$mf_impact,na.rm=T),2))
+
+# Menopause knowledge
+cat("Menopause knowledge: mean =",
+    round(mean(mp$MP_knowledge,na.rm=T),2),", SD =",round(sd(mp$MP_knowledge,na.rm=T),2))
+```
+
+#### 6.2.4.1. MRS categories
+
+For the Menopause Rating Scale, in addition to considering the severity scores as continuous, we also apply the reference values proposed by [Heinemann et al. (2004)](#ref) to identify MSR symptom categories for the total score and each subscale.
+```{r, fig.width=10, fig.height=2,warning=FALSE, message=FALSE,results='asis'}
+# total score
+mp[!is.na(mp$MRS) & mp$MRS <= 4,"mrs.cat"] <- "no-little"
+mp[!is.na(mp$MRS) & mp$MRS >= 5,"mrs.cat"] <- "mild"
+mp[!is.na(mp$MRS) & mp$MRS >= 9 ,"mrs.cat"] <- "moderate"
+mp[!is.na(mp$MRS) & mp$MRS >= 17,"mrs.cat"] <- "severe"
+
+# psy
+mp[!is.na(mp$mrs.psy) & mp$mrs.psy <= 1,"mrs.cat.psy"] <- "no-little"
+mp[!is.na(mp$mrs.psy) & mp$mrs.psy >= 2,"mrs.cat.psy"] <- "mild"
+mp[!is.na(mp$mrs.psy) & mp$mrs.psy >= 4,"mrs.cat.psy"] <- "moderate"
+mp[!is.na(mp$mrs.psy) & mp$mrs.psy >= 7,"mrs.cat.psy"] <- "severe"
+
+# som
+mp[!is.na(mp$mrs.som) & mp$mrs.som <= 2,"mrs.cat.som"] <- "no-little"
+mp[!is.na(mp$mrs.som) & mp$mrs.som >= 3,"mrs.cat.som"] <- "mild"
+mp[!is.na(mp$mrs.som) & mp$mrs.som >= 5,"mrs.cat.som"] <- "moderate"
+mp[!is.na(mp$mrs.som) & mp$mrs.som >= 9,"mrs.cat.som"] <- "severe"
+
+# uro
+mp[!is.na(mp$mrs.uro) & mp$mrs.uro == 0,"mrs.cat.uro"] <- "no-little"
+mp[!is.na(mp$mrs.uro) & mp$mrs.uro == 1,"mrs.cat.uro"] <- "mild"
+mp[!is.na(mp$mrs.uro) & mp$mrs.uro >= 2,"mrs.cat.uro"] <- "moderate"
+mp[!is.na(mp$mrs.uro) & mp$mrs.uro >= 4,"mrs.cat.uro"] <- "severe"
+
+# setting factor levels
+p <- data.frame(Variable=c("mrs.cat",paste0("mrs.cat.",c("psy","som","uro"))))
+for(Var in p$Variable){ mp[,Var] <- factor(mp[,Var],levels=c("no-little","mild","moderate","severe"))}
+
+# showing percentages
+for(i in 1:nrow(p)){
+  p[i,"Descr"] <- paste0(c(levels(mp[,p[i,"Variable"]]),"NA")," ",
+                         round(100*summary(mp[,p[i,"Variable"]])/nrow(mp),2),"%",collapse=", ") }
+knitr::kable(p)
+
+# plotting
+library(gridExtra)
+grid.arrange(ggplot(mp,aes(mrs.cat))+geom_bar()+coord_flip(),
+             ggplot(mp,aes(mrs.cat.psy))+geom_bar()+coord_flip(),
+             ggplot(mp,aes(mrs.cat.som))+geom_bar()+coord_flip(),
+             ggplot(mp,aes(mrs.cat.uro))+geom_bar()+coord_flip(),nrow=1)
+```
+
+<br>
+
+### 6.2.5. Work-related problems
+
+Fifth, we summarize the result of the `workProblems` variables, resulting from a single item requiring to indicate whether a number of work-related problems due to menopause symptoms have been experienced or not.
+```{r, fig.width=12, fig.height=5,warning=FALSE, message=FALSE}
+# recoding: from Yes/No to 1/0
+for(coL in paste0("workProblems_",1:9)){ mp[,coL] <- as.integer(as.character(mp[,coL])) }
+
+# No. of responses with NO orient, min, and max
+noProb <- nrow(mp[!is.na(mp$workProblems_9) & mp$workProblems_9==1,])
+pnoProb <- round(100*nrow(mp[!is.na(mp$workProblems_9) &
+                               mp$workProblems_9==1,])/nrow(mp[!is.na(mp$workProblems_9),]),1)
+cat(noProb,"participants reporting no MP-related problems at work (",pnoProb,"% )")
+
+# 1+ problems
+workProb <- mp[!is.na(mp$workProblems_9) & mp$workProblems_9==0,c("ID",paste0("workProblems_",1:9))]
+workProb$sum <- apply(workProb[,paste0("workProblems_",1:9)],1,sum,na.rm=TRUE) # summing values
+cat(nrow(workProb),"participants reported from",min(workProb$sum),"to",max(workProb$sum),"problems")
+
+# creating summary table
+wpDf <- data.frame(wpCat=paste0("workProblems_",1:8),
+                   n=as.numeric(t(colSums(workProb[,paste0("workProblems_",1:8)],na.rm=TRUE))))
+wpDf$p <- round(100*wpDf$n/nrow(mp[!is.na(mp$workProblems_9),]),2) 
+wpDf$wpCat <- c("Felt less productive","Reduced work hours","Called in sick","Leave absence",
+                "Felt less patient","Higher work stress","Declined promotion",
+                "Lost self-confidence")
+wpDf$wpCat <- factor(wpDf$wpCat,levels=wpDf$wpCat)
+wpDf <- wpDf[order(wpDf$n,decreasing=TRUE),]
+wpDf$wpCat <- factor(wpDf$wpCat,levels=as.character(wpDf$wpCat))
+
+# plotting
+ggplot(wpDf,aes(x=wpCat,y=p)) + geom_bar(stat="identity") +
+  theme(axis.text.x=element_text(angle=45),text=element_text(size=20,hjust=1)) + 
+  xlab("") + ylab("% of responses")
+ggsave(file="figures/Figure4.tiff",dpi=300)
+
+# frequency table
+wpDf
+```
+
+<br>
+
+### 6.2.6. Workplace measures
+
+Sixth, we summarize the result of the `measures` variables, resulting from a single item requiring to indicate whether a number of workplace measures targeting menopause symptoms are considered as 'helpful/desired' and if they have been already implemented in the respondent's workplace.
+```{r, fig.width=12, fig.height=5,warning=FALSE, message=FALSE}
+# recoding as integer and isolating helpful and implemented measures
+for(meas in paste0(rep(paste0("measures_",1:9),each=2),"_",c("helpful","implemented"))){
+  mp[,meas] <- as.integer(as.character(mp[,meas]))
+  colnames(mp)[which(colnames(mp)==meas)] <- paste0("meas",substr(meas,12,15),substr(meas,9,10)) }
+
+# composite scores
+mp$meashelp_sum <- apply(mp[,paste0("meashelp_",1:9)],1,sum)
+mp$measimpl_sum <- apply(mp[,paste0("measimpl_",1:9)],1,sum)
+
+# No. of responses with NO helpful measures
+noHelp <- nrow(mp[!is.na(mp$meashelp_1) & mp$meashelp_sum==0,])
+pnoHelp <- round(100*nrow(mp[!is.na(mp$meashelp_1) & mp$meashelp_sum==0,])/
+                   nrow(mp[!is.na(mp$meashelp_1),]),2)
+# No. of responses with NO implemented measures
+noImpl <- nrow(mp[!is.na(mp$measimpl_1) & mp$measimpl_sum==0,])
+pnoImpl <- round(100*nrow(mp[!is.na(mp$measimpl_1) & mp$measimpl_sum==0,])/
+                   nrow(mp[!is.na(mp$measimpl_1),]),2)
+cat(noHelp,"participants reporting no helpful measures (",pnoHelp,"% )\n",
+    noImpl,"participants reporting no implemented measures (",pnoImpl,"% )")
+
+# isolating cases with 1+ responses
+measHelp <- mp[!is.na(mp$meashelp_sum) & mp$meashelp_sum!=0,c("ID",paste0("meashelp_",1:9),
+                                                              "meashelp_sum")]
+measImpl <- mp[!is.na(mp$measimpl_sum) & mp$measimpl_sum!=0,c("ID",paste0("measimpl_",1:9),
+                                                              "measimpl_sum")]
+cat(nrow(measHelp),"participants reported from",
+    min(measHelp$meashelp_sum,na.rm=T),"to",max(measHelp$meashelp_sum,na.rm=T),"desired measures")
+cat(nrow(measImpl),"participants reported from",
+    min(measImpl$measimpl_sum,na.rm=T),"to",max(measImpl$measimpl_sum,na.rm=T),"implemented measures")
+
+# creating summary tables
+helpDf <- data.frame(wpCat=paste0("meashelp_",1:9),
+                     n=as.numeric(t(colSums(measHelp[,paste0("meashelp_",1:9)],na.rm=TRUE))))
+helpDf$p <- round(100*helpDf$n/nrow(mp[!is.na(mp$meashelp_1),]),2) 
+implDf <- data.frame(wpCat=paste0("measimpl_",1:9),
+                     n=as.numeric(t(colSums(measImpl[,paste0("measimpl_",1:9)],na.rm=TRUE))))
+implDf$p <- round(100*implDf$n/nrow(mp[!is.na(mp$measimpl_1),]),2) 
+
+# response labels
+measCat <- c("Formal policy","Managerial training","Paid time off and\nmedical appointments",
+             "Flexible work hours","Remote work option","Workplace accomodations",
+             "Informal support","Menopause specialists","Management solutions\n(e.g. mobile app)")
+measures <- data.frame(measCat = factor(rep(measCat,2),levels=measCat),
+                       Measure = c(rep("Desired/Helpful",9),rep("Implemented",9)),
+                       n = c(helpDf$n, implDf$n), p = c(helpDf$p, implDf$p))
+impl <- measures[measures$Measure=="Implemented",]
+impl <- impl[order(impl$n,decreasing=TRUE),] # sorting labels by No. of implemented cases
+measures$measCat <- factor(measures$measCat,levels=as.character(impl$measCat))
+
+# plotting
+ggplot(measures,aes(x=measCat,y=p,fill=Measure)) + geom_bar(stat="identity",position=position_dodge())+
+  theme(axis.text.x=element_text(angle=45,hjust=1),text=element_text(size=18)) + 
+  xlab("") + ylab("% of responses")
+ggsave(file="figures/Figure5.tiff",dpi=300)
+
+# plotting as separate figures
+des <- measures[measures$Measure=="Desired/Helpful",]
+des <- des[order(des$n,decreasing=TRUE),]
+des$measCat <- factor(des$measCat,levels=as.character(des$measCat))
+ggplot(des,aes(x=measCat,y=p)) + geom_bar(stat="identity",position=position_dodge())+
+  theme(axis.text.x=element_text(angle=45,hjust=1),text=element_text(size=18)) + 
+  xlab("") + ylab("% of responses")
+ggsave(file="figures/Figure5_desired.tiff",dpi=300)
+ggplot(measures[measures$Measure=="Implemented",],aes(x=measCat,y=p)) + geom_bar(stat="identity",position=position_dodge())+
+  theme(axis.text.x=element_text(angle=45,hjust=1),text=element_text(size=18)) + 
+  xlab("") + ylab("% of responses")
+ggsave(file="figures/Figure5_implemented.tiff",dpi=300)
+
+# frequency table
+measures
+```
+
+<br>
+
+### 6.2.7. Concerns
+
+Fifth, we summarize the result of the `concerns` variables, resulting from a single item requiring to indicate whether a number of concerns about discussing menopause at work have been experienced or not.
+```{r, fig.width=12, fig.height=5,warning=FALSE, message=FALSE}
+# recoding: from Yes/No to 1/0
+for(coL in paste0("concerns_",c(1:9,0))){ mp[,coL] <- as.integer(as.character(mp[,coL])) }
+
+# No. of responses with NO orient, min, and max
+mp$concSum <- apply(mp[,paste0("concerns_",1:9)],1,sum) # summing values
+mp[!is.na(mp$concSum) & mp$concSum==0,"concerns_0"] <- 1
+noConc <- nrow(mp[!is.na(mp$concerns_0) & mp$concerns_0==1,])
+pnoConc <- round(100*nrow(mp[!is.na(mp$concerns_0) & mp$concerns_0==1,])/nrow(mp[!is.na(mp$concerns_0),]),1)
+cat(noConc,"participants reporting no concerns (",pnoConc,"% )")
+
+# 1+ concerns
+workConc <- mp[!is.na(mp$concerns_0) & mp$concerns_0==0,c("ID",paste0("concerns_",1:9))]
+pConc <- round(100*nrow(workConc)/nrow(mp[!is.na(mp$concerns_0),]),2)
+workConc$sum <- apply(workConc[,paste0("concerns_",1:9)],1,sum,na.rm=TRUE) # summing values
+cat(nrow(workConc),"participants (",pConc,"%) reported from",min(workConc$sum),"to",max(workConc$sum),"problems")
+
+# creating summary table
+concDf <- data.frame(concCat=paste0("concerns_",1:9),
+                   n=as.numeric(t(colSums(workConc[,paste0("concerns_",1:9)],na.rm=TRUE))))
+concDf$p <- round(100*concDf$n/nrow(mp[!is.na(mp$concerns_0),]),2) 
+concCat <- c("Shame","Being perceived \nas unable to work","Fear of losing out \npromotions/opportunities",
+             "Being perceived \nas weak","Fear of reputational harm",
+             "Negative impact \non relationships","Fear of discrimination","Getting laid off","Other concerns")
+concDf$concCat <- factor(concCat,levels=concCat)
+concDf <- concDf[order(concDf$n,decreasing=TRUE),] # sorting by freq
+concDf$concCat <- factor(as.character(concDf$concCat),levels=as.factor(concDf$concCat))
+
+# plotting
+ggplot(concDf,aes(x=concCat,y=p)) + geom_bar(stat="identity") +
+  theme(axis.text.x=element_text(angle=45),text=element_text(size=20,hjust=1)) + 
+  geom_text(aes(y=p+5,label=round(p,1)),size=5) +
+  xlab("") + ylab("% of responses")
+ggsave(file="figures/Figure6.tiff",dpi=300)
+
+# frequency table
+concDf
+```
+
+<br>
+
+## 6.3. Bivariate descriptives
+
+Here, we provide bivariate statistics for the considered variable.
+
+### 6.3.1. Correlations
+
+First, we compute and plot the correlations between the considered variables by only considering complete responses (N = `r nrow(na.omit(mp[,variables]))`). This is done with the `corPrint` function.
+
+<details><summary>`corPrint()`</summary>
+<p>
+```{r class.source = "fold-show"}
+corPrint <- function(data,variables,pvalue=FALSE,correction="bonferroni"){ 
+  require(Rmisc); require(Hmisc)
+  
+  out <- rcorr(as.matrix(data[,variables]), type = "pearson")
+  rb <- round(out$r,2) # corr coefficients
+  rb[upper.tri(rb)] <- NA
+  rb.p <- out$P # pvalues
+  rb.p[upper.tri(rb.p)] <- NA
+  
+  # correcting and adding p-values
+  if(pvalue==TRUE){
+    adj <- data.frame(original=rb.p[!is.na(rb.p)],sig=rep(NA,length(rb.p[!is.na(rb.p)])))
+    adj$adjusted=p.adjust(adj$original,method=correction)
+    # significance level
+    adj[adj$adjusted<.05,"sig"] <- "*"
+    adj[adj$adjusted<.01,"sig"] <- "**"
+    adj[adj$adjusted<.001,"sig"] <- "***"
+    adj[is.na(adj$sig),"sig"] <- ""
+    for(i in 1:nrow(adj)){ rb.p[!is.na(rb.p) & rb.p==adj[i,"original"]] <- adj[i,"sig"] }
+    for(i in 1:nrow(rb.p)){ for(j in 1:ncol(rb.p)){ 
+      if(!is.na(rb.p[i,j])){ rb[i,j] <- paste(round(as.numeric(rb[i,j]),2),rb.p[i,j],sep="")
+      } else { rb[i,j] <- "" }
+      rb[i,j] <- gsub("0\\.",".",rb[i,j]) }} }
+  return(rb)}
+```
+</p>
+</details>
+
+```{r  warning=FALSE,message=FALSE}
+# computing correlations
+cors <- corPrint(mp,variables,pvalue=TRUE,correction="bonferroni")
+knitr::kable(cors)
+```
+
+Here, the same correlations are visualized in a heat diagram.
+```{r  warning=FALSE,message=FALSE}
+ggplot(melt(t(as.matrix(corPrint(mp,variables)))),
+       aes(x=Var1, y=Var2, fill=value)) + geom_tile() + 
+  geom_text(aes(x = Var1, y = Var2, label = round(value,2)),color="black",size=3.5)+labs(x="",y="") +
+  scale_fill_gradient2(low="darkblue",high="#f03b20",mid="white",midpoint=0,limit = c(-1,1), space = "Lab",
+                       name="Pearson\nCorrelation",guide="legend",breaks=round(seq(1,-1,length.out = 11),2),
+                       minor_breaks=round(seq(1,-1,length.out = 11),2))+
+  theme(text=element_text(face="bold",size=10),axis.text.x=element_text(angle=30))
+```
+
+## 6.4. Output table
+
+The table below shows the univariate descriptive statistics of, and the correlations between, the considered measures.
+```{r  }
+table2 <- cbind(descr,cors)
+table2$Variable <- paste0(1:nrow(table2),". ",table2$Variable)
+colnames(table2)[3:ncol(table2)] <- paste0(1:length(variables),".")
+knitr::kable(table2,row.names=FALSE)
+```
+
+<br>
+
+# 7. Regression models
+
+Here, we fit multiple regression models to test our hypotheses on the relationship between MRS scores and work-related experience, namely emotional exhaustion, work engagement, and turnover intentions. For each outcome, we fit a separate set of regression models in a hierarchical manner:
+
+1. Null model (intercept-only)
+
+2. Model including menopause symptoms severity `MRS` as a predictor
+
+3. Model also including workload `WL` as a predictor
+
+4. Model also including further covariates, namely `age`, `caregiving`*, menopause hormonal therapy `MHT`, and `health_condition` as covariates
+
+*`caregiving` is recoded as "Yes" when a participant reported either taking care of an adult or taking care of children, and "No" when neither one nor the other condition apply.
+```{r  warning=FALSE,message=FALSE}
+# packages used in the regression analyses
+library(MuMIn); library(sjPlot)
+
+# renaming mp hormonal theraphy as MHT
+colnames(mp)[which(colnames(mp)=="rs_MP_hormTheraphy")] <- "MHT"
+
+# recoding caregiving
+mp[!is.na(mp$caregiver) & !is.na(mp$childcare) &
+     (mp$caregiver=="Yes" | mp$childcare=="Yes"),"caregiving"] <- "Yes" 
+mp[!is.na(mp$caregiver) & !is.na(mp$childcare) &
+     (mp$caregiver=="No" & mp$childcare=="No"),"caregiving"] <- "No" 
+mp$caregiving <- as.factor(mp$caregiving) # as factor
+cat("Caregiving (recoded):")
+summary(mp$caregiving)
+```
+
+<br>
+
+## 7.1. Emotional exhaustion
+
+First, we specify our models in a hierarchical manner on the list-wise-deleted dataset. Note that all continuous predictors are grand-mean-centered for better interpreting the model intercept.
+```{r  }
+# list-wise deletion (removing all missing values in the considered variables)
+df <- na.omit(mp[,c("EE","MRS","WL","age","MHT","health_conditions","caregiving")])
+cat("Fitting models on",nrow(df),"observations")
+
+# grand mean centering continuous predictors
+df$MRS <- df$MRS - mean(df$MRS)
+df$WL <- df$WL - mean(df$WL)
+df$age <- df$age - mean(df$age)
+
+# null model (no predictors)
+EE.m0 <- lm(EE ~ 1, data = df)
+
+# model M1 (menopause symptom severity)
+EE.m1 <- lm(EE ~ MRS, data = df)
+
+# model M2 (workload as a job demand)
+EE.m2 <- lm(EE ~ MRS + WL, data = df)
+
+# model M3 (covariates)
+EE.m3 <- lm(EE ~ MRS + WL + age + MHT + health_conditions + caregiving, data = df)
+```
+
+<br>
+
+Second, we inspect the diagnostics of the most complex model. Linear model assumptions seem to be met by the examined model: residuals are normally distributed and centered on zero, residuals and their variance seem quite constant over fitted values, and VIF indicate low risk for multicollinearity.
+```{r  message=FALSE,warning=FALSE,fig.height=5,fig.width=12}
+p <- plot_model(EE.m3,type="diag")
+plot_grid(p,tags=TRUE,margin=c(0,0,0,0))
+```
+
+As a further diagnostic, we examine the impact of influential cases (i.e., based on the Cook's distance) on the parameter estimated for `MRS.` We can see that several influential cases are detected, but none of them seem to substantially change the parameter estimated for `MRS`.
+```{r  warning=FALSE,message=FALSE}
+# Cook's distances
+df$cd <- cooks.distance(EE.m3)
+
+# Plot the Cook's Distance using the traditional 4/n criterion
+rownames(df) <- 1:nrow(df)
+plot(df$cd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4/nrow(df), col="red")  # add cutoff line
+text(x=1:nrow(df)+1, y=df$cd, labels=ifelse(df$cd>4/nrow(df), rownames(df),""), col="red")  # add labels
+
+# plotting effects with and without influential cases
+influential <- as.integer(rownames(df[df$cd > (4/nrow(df)),]))
+df2 <- df[-influential, ] # removing influential cases
+p1 <- ggplot(data = df, aes(x = MRS, y = EE)) + geom_point() + geom_smooth(method = lm) + 
+  ggtitle(paste0("With influential: b = ",round(coefficients(EE.m3)[2],2)))
+p2 <- ggplot(data = df2, aes(x = MRS, y = EE)) + geom_point() + geom_smooth(method = lm) + 
+  ggtitle(paste0("Without influentials: b = ",round(coefficients(update(EE.m3,data=df2))[2],2)))
+gridExtra::grid.arrange(p1, p2, ncol=2)
+```
+
+<br>
+
+Third, we compare the models by using the weight of the Akaike Information Criterion ([Wagenmakers & Ferrel, 2004](#ref)).
+```{r  }
+Weights(AIC(EE.m0,EE.m1,EE.m2,EE.m3)) # model M3 is the best model
+```
+
+<br>
+
+Fourth, we inspect the parameter estimated by each model. We can see that `MRS` is significantly related to `EE` consistently across the four models. Particularly, its inclusion in the null model is associated with an $R^2$ of .22 (i.e., explaining 22% of `EE` variance).
+```{r  }
+# print model output
+tab_model(EE.m0,EE.m1,EE.m2,EE.m3, # all significant but health_conditions
+          show.se=TRUE,collapse.se=TRUE,string.est="B (SE)",show.re.var = TRUE) 
+
+# plotting MRS effect
+plot_model(EE.m3,type="pred",terms="MRS") + 
+  geom_point(data=df,aes(x=MRS,y=EE),color="darkgray",position=position_jitter())
+```
+
+<br>
+
+## 7.2. Work Engagement
+
+First, we specify our models in a hierarchical manner on the list-wise-deleted dataset. Note that all continuous predictors are grand-mean-centered for better interpreting the model intercept.
+```{r  class.source = "fold-show"}
+# list-wise deletion (removing all missing values in the considered variables)
+df <- na.omit(mp[,c("WE","MRS","WL","age","MHT","health_conditions","caregiving")])
+cat("Fitting models on",nrow(df),"observations")
+
+# grand mean centering continuous predictors
+df$MRS <- df$MRS - mean(df$MRS)
+df$WL <- df$WL - mean(df$WL)
+df$age <- df$age - mean(df$age)
+
+# null model (no predictors)
+WE.m0 <- lm(WE ~ 1, data = df)
+
+# model M1 (menopause symptom severity)
+WE.m1 <- lm(WE ~ MRS, data = df)
+
+# model M2 (workload as a job demand)
+WE.m2 <- lm(WE ~ MRS + WL, data = df)
+
+# model M3 (covariates)
+WE.m3 <- lm(WE ~ MRS + WL + age + MHT + health_conditions + caregiving, data = df)
+```
+
+<br>
+
+Second, we inspect the diagnostics of the most complex model. Linear model assumptions seem to be met by the examined model: residuals are normally distributed and centered on zero, residuals and their variance seem quite constant over fitted values, and VIF indicate low risk for multicollinearity.
+```{r  message=FALSE,warning=FALSE,fig.height=5,fig.width=12}
+p <- plot_model(WE.m3,type="diag")
+plot_grid(p,tags=TRUE,margin=c(0,0,0,0))
+```
+
+As a further diagnostic, we examine the impact of influential cases (i.e., based on the Cook's distance) on the parameter estimated for `MRS.` We can see that several influential cases are detected, but none of them seem to substantially change the parameter estimated for `MRS`.
+```{r  warning=FALSE,message=FALSE}
+# Cook's distances
+df$cd <- cooks.distance(WE.m3)
+
+# Plot the Cook's Distance using the traditional 4/n criterion
+rownames(df) <- 1:nrow(df)
+plot(df$cd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4/nrow(df), col="red")  # add cutoff line
+text(x=1:nrow(df)+1, y=df$cd, labels=ifelse(df$cd>4/nrow(df), rownames(df),""), col="red")  # add labels
+
+# plotting effects with and without influential cases
+influential <- as.integer(rownames(df[df$cd > (4/nrow(df)),]))
+df2 <- df[-influential, ] # removing influential cases
+p1 <- ggplot(data = df, aes(x = MRS, y = WE)) + geom_point() + geom_smooth(method = lm) + 
+  ggtitle(paste0("With influential: b = ",round(coefficients(WE.m3)[2],2)))
+p2 <- ggplot(data = df2, aes(x = MRS, y = WE)) + geom_point() + geom_smooth(method = lm) + 
+  ggtitle(paste0("Without influentials: b = ",round(coefficients(update(WE.m3,data=df2))[2],2)))
+gridExtra::grid.arrange(p1, p2, ncol=2)
+```
+
+<br>
+
+Third, we compare the models by using the weight of the Akaike Information Criterion ([Wagenmakers & Ferrel, 2004](#ref)).
+```{r  }
+Weights(AIC(WE.m0,WE.m1,WE.m2,WE.m3)) # model M3 is the best model
+```
+
+<br>
+
+Fourth, we inspect the parameter estimated by each model. We can see that `MRS` is significantly related to `EE` consistently across the four models. Particularly, its inclusion in the null model is associated with an $R^2$ of .07 (i.e., explaining 7% of `WE` variance).
+```{r  warning=FALSE}
+# print model output
+tab_model(WE.m0,WE.m1,WE.m2,WE.m3, # all significant but health_conditions
+          show.se=TRUE,collapse.se=TRUE,string.est="B (SE)",show.re.var = TRUE) 
+
+# plotting MRS effect
+plot_model(WE.m3,type="pred",terms="MRS") + 
+  geom_point(data=mp,aes(x=MRS,y=WE),color="darkgray",position=position_jitter())
+```
+
+<br>
+
+## 7.3. Turnover intentions
+
+First, we specify our models in a hierarchical manner on the list-wise-deleted dataset. Note that all continuous predictors are grand-mean-centered for better interpreting the model intercept.
+```{r  }
+# list-wise deletion (removing all missing values in the considered variables)
+df <- na.omit(mp[,c("TI","MRS","WL","age","MHT","health_conditions","caregiving")])
+cat("Fitting models on",nrow(df),"observations")
+
+# grand mean centering continuous predictors
+df$MRS <- df$MRS - mean(df$MRS)
+df$WL <- df$WL - mean(df$WL)
+df$age <- df$age - mean(df$age)
+
+# null model (no predictors)
+TI.m0 <- lm(TI ~ 1, data = df)
+
+# model M1 (menopause symptom severity)
+TI.m1 <- lm(TI ~ MRS, data = df)
+
+# model M2 (workload as a job demand)
+TI.m2 <- lm(TI ~ MRS + WL, data = df)
+
+# model M3 (covariates)
+TI.m3 <- lm(TI ~ MRS + WL + age + MHT + health_conditions + caregiving, data = df)
+```
+
+Second, we inspect the diagnostics of the most complex model. Linear model assumptions seem to be met by the examined model. The residuals are very skewed, and **the normality assumption is not met**.
+```{r  message=FALSE,warning=FALSE,fig.height=5,fig.width=12}
+p <- plot_model(TI.m3,type="diag")
+plot_grid(p,tags=TRUE,margin=c(0,0,0,0))
+
+# skewness
+library(moments)
+skewness(df$TI)
+```
+
+As an alternative, we dichotomize `TI` by contrasting participants that strongly disagreed with the item statements (score < 2) to those that reported any degree of agreement (score equal to or higher than 2), and we conduct a **logistic regression**. We can see that the sample is quite balanced and that the `TI` variable in logit scale is quite linearly associated with all quantitative predictors, with results being robust to the removal of participants with large Cook's distances.
+```{r  message=FALSE,warning=FALSE,fig.width=10,fig.height=4}
+# dichotomizing TI
+df[df$TI < 2, "TI.dic"] <- 0
+df[df$TI >= 2, "TI.dic"] <- 1
+summary(as.factor(df$TI.dic)) # 150 vs 151
+
+# refitting models with logistic regression
+TI.m0 <- glm(TI.dic ~ 1, data = df, family=binomial(link="logit"))
+TI.m1 <- glm(TI.dic ~ MRS, data = df, family=binomial(link="logit"))
+TI.m2 <- glm(TI.dic ~ MRS + WL, data = df, family=binomial(link="logit"))
+TI.m3 <- glm(TI.dic ~ MRS + WL + age + MHT + health_conditions + caregiving, data = df, family=binomial(link="logit"))
+
+# inspecting GLM diagnostics
+df$probabilities <- predict(TI.m3, type = "response") # Predict the probability (p) of agreement
+df$logit <- log(df$probabilities/(1-df$probabilities)) # from probability to logit
+gridExtra::grid.arrange(ggplot(df, aes(logit,MRS))+geom_point(size=2)+
+                          geom_smooth(method="loess",span=2)+
+                          ggtitle("Linearity MRS"), # 1. linear rel. between continuous predictors & logit
+                        ggplot(df, aes(logit,WL))+geom_point(size=2)+
+                          geom_smooth(method="loess",span=2)+
+                          ggtitle("Linearity WL"),
+                        ggplot(df, aes(logit,age))+geom_point(size=2)+
+                          geom_smooth(method="loess",span=2)+
+                          ggtitle("Linearity WL"),nrow=1)
+```
+As a further diagnostic, we examine the impact of influential cases (i.e., based on the Cook's distance) on the parameter estimated for `MRS.` We can see that several influential cases are detected, but none of them seem to substantially change the parameter estimated for `MRS`.
+```{r  warning=FALSE,message=FALSE}
+# Cook's distances
+df$cd <- cooks.distance(TI.m3)
+
+# Plot the Cook's Distance using the traditional 4/n criterion
+rownames(df) <- 1:nrow(df)
+plot(df$cd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4/nrow(df), col="red")  # add cutoff line
+text(x=1:nrow(df)+1, y=df$cd, labels=ifelse(df$cd>4/nrow(df), rownames(df),""), col="red")  # add labels
+
+# plotting effects with and without influential cases
+influential <- as.integer(rownames(df[df$cd > (4/nrow(df)),]))
+df2 <- df[-influential, ] # removing influential cases
+cat("With influential cases:")
+coefficients(TI.m3)
+cat("Without influential:")
+coefficients(update(TI.m3,data=df2))
+```
+
+Third, we compare the models by using the weight of the Akaike Information Criterion ([Wagenmakers & Ferrel, 2004](#ref)).
+```{r  }
+Weights(AIC(TI.m0,TI.m1,TI.m2,TI.m3)) # model M3 is the best model
+```
+
+Fourth, we inspect the parameter estimated by each model. We can see that `MRS` is significantly related to `TI` consistently across the four models. Particularly, its inclusion in the null model is associated with a Tjur's $R^2$ of .03 (i.e., explaining 3% of `TI` variance).
+```{r  warning=FALSE,message=FALSE}
+# print model output
+tab_model(TI.m0,TI.m1,TI.m2,TI.m3, # all significant but health_conditions
+          show.se=TRUE,collapse.se=TRUE,string.est="B (SE)",show.re.var = TRUE) 
+
+# plotting MRS effect
+plot_model(TI.m3,type="pred",terms="MRS") + 
+  geom_point(data=df,aes(x=MRS,y=TI.dic),color="darkgray")
+```
+
+<br>
+
+# References {#ref}
+
+- Heinemann, K., Ruebig, A., Potthoff, P., Schneider, H. P., Strelow, F., Heinemann, L. A., & Thai, D. M. (2004). The Menopause Rating Scale (MRS) scale: a methodological review. *Health and Quality of life Outcomes, 2*, 1-8. https://doi.org/10.1186/1477-7525-2-45
+
+- Wagenmakers, E.-J., & Farrell, S. (2004). AIC model selection using Akaike weights. *Psychonomic Bulletin & Review, 11*(1), 192–196. https://doi.org/10.3758/BF03206482
+
+<br>
